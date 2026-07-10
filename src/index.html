@@ -40,6 +40,8 @@
   import * as Y from 'https://esm.sh/yjs@13'
 
   const room = location.hash.slice(1) || 'lobby'
+  const urlParams = new URLSearchParams(window.location.search);
+  const token = urlParams.get('token') || prompt('Room password (sets password if room is new):') || ''
   const agent = localStorage.agent || (localStorage.agent = prompt('Your name?') || 'human')
   document.getElementById('room').textContent = room
 
@@ -56,7 +58,7 @@
     return Object.values(votes).includes(true) ? 'approved' : 'pending'
   }
 
-  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/room/${room}`)
+  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/room/${room}?token=${encodeURIComponent(token)}`)
   ws.binaryType = 'arraybuffer'
   ws.onopen = () => ws.send(JSON.stringify({ type: 'join', agent, kind: 'human' }))
   ws.onmessage = (e) => {

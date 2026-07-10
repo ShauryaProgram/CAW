@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 const ROOM = 'mcp-check-' + Math.random().toString(36).slice(2, 8)
+const TOKEN = 'secret123'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // a throwaway git repo for the worktree tool
@@ -20,7 +21,7 @@ execSync('git init -q && git commit -q --allow-empty -m init', { cwd: repo })
 // simulated human peer (what the CLI / web UI does)
 const human = await new Promise((resolve, reject) => {
   const ydoc = new Y.Doc()
-  const ws = new WebSocket(`ws://localhost:8787/room/${ROOM}`)
+  const ws = new WebSocket(`ws://localhost:8787/room/${ROOM}?token=${TOKEN}`)
   ws.on('open', () => ws.send(JSON.stringify({ type: 'join', agent: 'shaurya', kind: 'human' })))
   ws.on('message', (data, isBinary) => {
     if (isBinary) return Y.applyUpdate(ydoc, new Uint8Array(data), 'remote')
@@ -34,7 +35,7 @@ const client = new Client({ name: 'check', version: '0.0.0' })
 await client.connect(new StdioClientTransport({
   command: 'node',
   args: ['/Users/shauryabhushan/Documents/caw/bridge/caw-mcp.js'],
-  env: { ...process.env, CAW_URL: 'ws://localhost:8787', CAW_ROOM: ROOM, CAW_AGENT: 'claude-a', CAW_DIR: repo },
+  env: { ...process.env, CAW_URL: 'ws://localhost:8787', CAW_ROOM: ROOM, CAW_AGENT: 'claude-a', CAW_DIR: repo, CAW_TOKEN: TOKEN },
 }))
 const call = async (name, args = {}) => (await client.callTool({ name, arguments: args })).content[0].text
 const callJ = async (name, args) => JSON.parse(await call(name, args))

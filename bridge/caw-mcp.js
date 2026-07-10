@@ -14,6 +14,7 @@ import path from 'node:path'
 const URL_ = process.env.CAW_URL || 'ws://localhost:8787'
 const ROOM = process.env.CAW_ROOM || 'lobby'
 const AGENT = process.env.CAW_AGENT || 'agent-' + process.pid
+const TOKEN = process.env.CAW_TOKEN || ''
 const DIR = process.env.CAW_DIR // shared project directory (a git repo) agents work in
 
 const ydoc = new Y.Doc()
@@ -36,7 +37,7 @@ const inbox = [] // buffered bus messages since connect; drained by caw_read_mes
 
 function connect() {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`${URL_}/room/${ROOM}`)
+    const ws = new WebSocket(`${URL_}/room/${ROOM}?token=${encodeURIComponent(TOKEN)}`)
     ws.on('open', () => ws.send(JSON.stringify({ type: 'join', agent: AGENT })))
     ws.on('message', (data, isBinary) => {
       if (isBinary) return Y.applyUpdate(ydoc, new Uint8Array(data), 'remote')

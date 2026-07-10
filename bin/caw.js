@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Headless human interface to a CAW room — everything the web UI does, from a terminal.
-// Usage: caw [--url ws://…] [--room name] [--as you] <command>
+// Usage: caw [--url ws://…] [--room name] [--as you] [--token pass] <command>
 //   status                     who's in the room
 //   doc                        print the shared doc
 //   doc set "text"             replace the shared doc
@@ -26,6 +26,7 @@ const opt = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? args
 const URL_ = opt('--url', process.env.CAW_URL || 'ws://localhost:8787')
 const ROOM = opt('--room', process.env.CAW_ROOM || 'lobby')
 const AGENT = opt('--as', process.env.CAW_AGENT || process.env.USER || 'human')
+const TOKEN = opt('--token', process.env.CAW_TOKEN || '')
 const [cmd, ...rest] = args
 
 const ydoc = new Y.Doc()
@@ -44,7 +45,7 @@ function proposalStatus(p) {
 const fmtPeer = (p) => (p.kind === 'agent' ? '🤖' : '👤') + p.agent
 
 let peers = []
-const ws = new WebSocket(`${URL_}/room/${ROOM}`)
+const ws = new WebSocket(`${URL_}/room/${ROOM}?token=${encodeURIComponent(TOKEN)}`)
 const synced = new Promise((resolve, reject) => {
   ws.on('open', () => ws.send(JSON.stringify({ type: 'join', agent: AGENT, kind: 'human' })))
   ws.on('error', reject)

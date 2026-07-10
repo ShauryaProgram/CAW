@@ -19,6 +19,16 @@ export class Room {
   async fetch(req) {
     if (req.headers.get('Upgrade') !== 'websocket')
       return new Response('expected websocket', { status: 426 })
+    
+    // Auth: per-room tokens
+    const token = new URL(req.url).searchParams.get('token') || ''
+    const storedToken = await this.ctx.storage.get('token')
+    if (!storedToken) {
+      await this.ctx.storage.put('token', token)
+    } else if (storedToken !== token) {
+      return new Response('unauthorized', { status: 401 })
+    }
+
     const [client, server] = Object.values(new WebSocketPair())
     this.ctx.acceptWebSocket(server) // hibernation API — $0 idle
     return new Response(null, { status: 101, webSocket: client })
@@ -37,11 +47,24 @@ export class Room {
     if (m.type === 'join') {
       ws.serializeAttachment({ agent: m.agent || 'anon', kind: m.kind === 'human' ? 'human' : 'agent' })
       for (const u of await this.updates()) ws.send(u) // catch-up
+      
+      // Bus history catch-up
+      const history = (await this.ctx.storage.get('bus_history')) || []
+      for (const h of history) ws.send(h)
+
       ws.send('{"type":"synced"}')
       this.broadcastPresence()
     } else {
-      // bus message: stamp sender, relay to everyone else. No business logic here.
-      this.fanout(ws, JSON.stringify({ ...m, from: ws.deserializeAttachment()?.agent }))
+      // bus message: stamp sender, relay to everyone else.
+      const stamped = JSON.stringify({ ...m, from: ws.deserializeAttachment()?.agent, timestamp: Date.now() })
+      
+      // Save to bus history (keep last 100 messages)
+      let history = (await this.ctx.storage.get('bus_history')) || []
+      history.push(stamped)
+      if (history.length > 100) history = history.slice(-100)
+      await this.ctx.storage.put('bus_history', history)
+
+      this.fanout(ws, stamped)
     }
   }
 

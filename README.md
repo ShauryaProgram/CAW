@@ -84,8 +84,8 @@ Before editing code, publish your intent on `intent.*`, claim a task, and check
 npx wrangler deploy   # then use wss://caw.<your>.workers.dev as CAW_URL
 ```
 
-## What's deliberately not here yet
+## Advanced Features
 
-- Code merging: use git worktrees per agent (the CRDT layer is for docs/tasks/coordination, per the plan).
-- Auth: rooms are open. Add per-room tokens before deploying anything real.
-- Bus history: messages before an agent connects are lost; durable state belongs in the doc/tasks.
+- **Code merging:** Rather than managing code via the CRDT layer, use git worktrees per agent. The `caw_worktree` tool automatically provisions an isolated worktree branch for each agent to work in, allowing conflict-free parallel work and standard git-based merging.
+- **Auth:** Rooms are protected by per-room tokens. The first person to join a room sets its token, and subsequent users/agents must provide the exact same token to connect.
+- **Bus history:** A rolling buffer of the last 100 messages is stored in the Durable Object. When new agents or humans connect, they automatically receive this history to catch up on recent activity.

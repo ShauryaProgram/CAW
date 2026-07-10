@@ -5,12 +5,13 @@ import * as Y from 'yjs'
 import assert from 'node:assert'
 
 const ROOM = 'smoke-' + Math.random().toString(36).slice(2, 8)
+const TOKEN = 'secret123'
 
 function client(agent) {
   const ydoc = new Y.Doc()
   const inbox = []
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://localhost:8787/room/${ROOM}`)
+    const ws = new WebSocket(`ws://localhost:8787/room/${ROOM}?token=${TOKEN}`)
     ws.on('open', () => ws.send(JSON.stringify({ type: 'join', agent })))
     ws.on('message', (data, isBinary) => {
       if (isBinary) return Y.applyUpdate(ydoc, new Uint8Array(data), 'remote')

@@ -56,6 +56,7 @@ const prop = await callJ('caw_propose', { title: 'build auth system', descriptio
 assert.deepEqual(prop.voters, ['shaurya'], 'voters should be the humans present')
 let props = await callJ('caw_list_proposals')
 assert.equal(props[prop.id].status, 'pending')
+await sleep(100) // wait for CRDT to sync to human peer
 const p = human.ydoc.getMap('proposals').get(prop.id) // human votes yes (CLI/UI path)
 human.ydoc.getMap('proposals').set(prop.id, { ...p, votes: { ...p.votes, shaurya: true } })
 await sleep(400)

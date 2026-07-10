@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Headless human interface to a CAW room — everything the web UI does, from a terminal.
 // Usage: caw [--url ws://…] [--room name] [--as you] [--token pass] <command>
+//   init                       auto-inject MCP config into your IDE (Cursor, OpenCode, Claude)
 //   status                     who's in the room
 //   doc                        print the shared doc
 //   doc set "text"             replace the shared doc
@@ -18,6 +19,7 @@
 //   answer <id> "text"         answer an agent's question
 //   stats                      progress: who's on what, counts, open gates
 //   watch                      live-tail presence, bus, and task changes (Ctrl-C to stop)
+//   watchdog                   auto-recover stalled tasks if agents go silent
 import WebSocket from 'ws'
 import * as Y from 'yjs'
 
@@ -69,6 +71,100 @@ const printTasks = () => {
 }
 
 switch (cmd) {
+  case 'init': {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const bridgePath = path.resolve('bridge/caw-mcp.js')
+    const env = { CAW_URL: URL_, CAW_ROOM: ROOM, CAW_AGENT: AGENT }
+    if (TOKEN) env.CAW_TOKEN = TOKEN
+    
+    const configs = [
+      { file: '.cursor/mcp.json', type: 'standard' },
+      { file: '.opencode/opencode.json', type: 'opencode' },
+      { file: path.join(process.env.HOME || '', '.config/opencode/opencode.json'), type: 'opencode' },
+      { file: path.join(process.env.HOME || '', '.claude.json'), type: 'standard' },
+      { file: path.join(process.env.HOME || '', '.codex/config.toml'), type: 'toml' },
+      { file: path.join(process.env.HOME || '', '.codeium/windsurf/mcp_config.json'), type: 'standard' }
+    ]
+
+    let updated = 0
+    for (const { file, type } of configs) {
+      if (!fs.existsSync(file)) {
+        if (file === '.cursor/mcp.json') {
+          fs.mkdirSync('.cursor', { recursive: true })
+          fs.writeFileSync(file, JSON.stringify({ mcpServers: {} }))
+        } else {
+          continue
+        }
+      }
+      
+      try {
+        if (type === 'standard') {
+          const cfg = JSON.parse(fs.readFileSync(file, 'utf8'))
+          cfg.mcpServers = cfg.mcpServers || {}
+          cfg.mcpServers.caw = { command: 'node', args: [bridgePath], env }
+          fs.writeFileSync(file, JSON.stringify(cfg, null, 2))
+          console.log(`✅ Updated ${file}`)
+          updated++
+        } else if (type === 'opencode') {
+          const cfg = JSON.parse(fs.readFileSync(file, 'utf8'))
+          cfg.mcp = cfg.mcp || {}
+          cfg.mcp.caw = { type: 'local', command: ['node', bridgePath], env }
+          fs.writeFileSync(file, JSON.stringify(cfg, null, 2))
+          console.log(`✅ Updated ${file}`)
+          updated++
+        } else if (type === 'toml') {
+          const tomlAppend = `\n[mcp_servers.caw]\ncommand = "node"\nargs = ["${bridgePath}"]\n[mcp_servers.caw.env]\nCAW_URL = "${URL_}"\nCAW_ROOM = "${ROOM}"\nCAW_AGENT = "${AGENT}"\n`
+          let content = fs.readFileSync(file, 'utf8')
+          if (!content.includes('[mcp_servers.caw]')) {
+            fs.appendFileSync(file, tomlAppend)
+            console.log(`✅ Updated ${file}`)
+            updated++
+          }
+        }
+      } catch (e) {
+        console.error(`❌ Failed to update ${file}: ${e.message}`)
+      }
+    }
+    if (updated > 0) console.log('MCP config injected! Please restart your AI agent to apply.')
+    else console.log('No supported IDE configs found. You may need to configure MCP manually.')
+    break
+  }
+  case 'watchdog': {
+    console.log(`watching for inactive agents in ${ROOM} @ ${URL_}... (Ctrl-C to stop)`)
+    const TIMEOUT_MS = 60000;
+    const lastSeen = new Map()
+
+    ws.on('message', (data, isBinary) => {
+      if (isBinary) return
+      const m = JSON.parse(data.toString())
+      if (m.type === 'bus' && m.from) {
+        lastSeen.set(m.from, Date.now())
+      }
+    })
+
+    setInterval(() => {
+      const now = Date.now()
+      let changed = false
+      ydoc.transact(() => {
+        for (const [id, t] of ytasks.entries()) {
+          if (t.status === 'working' && t.owner) {
+            const last = lastSeen.get(t.owner) || now
+            if (now - last > TIMEOUT_MS) {
+              console.log(`[watchdog] Agent ${t.owner} timed out. Re-queueing task ${id}...`)
+              ytasks.set(id, { ...t, status: 'submitted', owner: null, note: `auto-requeued (agent ${t.owner} timed out)` })
+              changed = true
+              ws.send(JSON.stringify({ type: 'bus', topic: 'task.requeued', data: { id, title: t.title, agent: t.owner } }))
+              lastSeen.delete(t.owner)
+            }
+          }
+        }
+      })
+    }, 10000)
+    
+    await new Promise(() => {})
+    break
+  }
   case 'status':
     await sleep(300) // peers arrive via the presence broadcast triggered by our own join
     console.log(`room: ${ROOM} @ ${URL_}\npeers: ${peers.map(fmtPeer).join(', ') || '(none)'}`)

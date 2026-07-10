@@ -1,0 +1,21 @@
+{
+  "name": "caw",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "caw": "bin/caw.js" },
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy",
+    "test": "node test/smoke.js && node test/mcp-check.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "ws": "^8.18.0",
+    "yjs": "^13.6.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

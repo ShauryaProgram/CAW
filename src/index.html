@@ -1,0 +1,141 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>CAW</title>
+<style>
+  body { font: 14px/1.4 system-ui; margin: 0; display: grid; grid-template-columns: 200px 1fr 320px; height: 100vh; }
+  section { padding: 12px; overflow-y: auto; border-right: 1px solid #ddd; }
+  h2 { font-size: 13px; text-transform: uppercase; color: #666; margin: 0 0 8px; }
+  textarea { width: 100%; height: 40vh; box-sizing: border-box; font: 13px/1.4 monospace; }
+  .task { border: 1px solid #ccc; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; }
+  .task small { color: #666; }
+  .task button { font-size: 11px; margin-right: 4px; }
+  #feed div { border-bottom: 1px solid #eee; padding: 4px 0; word-break: break-word; }
+  #peers li::before { content: '● '; color: #2a2; }
+  input, button { font: inherit; }
+  form { display: flex; gap: 4px; margin-bottom: 8px; }
+  form input { flex: 1; }
+</style>
+<section>
+  <h2>Room: <span id="room"></span></h2>
+  <h2>Peers</h2>
+  <ul id="peers"></ul>
+</section>
+<section>
+  <h2>Shared doc</h2>
+  <textarea id="doc"></textarea>
+  <h2>Tasks</h2>
+  <form id="addtask"><input placeholder="New task…" /><button>Add</button></form>
+  <div id="tasks"></div>
+</section>
+<section>
+  <h2>Proposals</h2>
+  <div id="proposals"></div>
+  <h2>Questions</h2>
+  <div id="questions"></div>
+  <h2>Bus</h2>
+  <form id="chat"><input placeholder="Message…" /><button>Send</button></form>
+  <div id="feed"></div>
+</section>
+<script type="module">
+  import * as Y from 'https://esm.sh/yjs@13'
+
+  const room = location.hash.slice(1) || 'lobby'
+  const agent = localStorage.agent || (localStorage.agent = prompt('Your name?') || 'human')
+  document.getElementById('room').textContent = room
+
+  const ydoc = new Y.Doc()
+  const ytext = ydoc.getText('doc')
+  const ytasks = ydoc.getMap('tasks')
+  const yprops = ydoc.getMap('proposals')
+  const yquestions = ydoc.getMap('questions')
+
+  function proposalStatus(p) {
+    const votes = p.votes || {}
+    if (Object.values(votes).includes(false)) return 'rejected'
+    if (p.voters?.length) return p.voters.every((v) => votes[v] === true) ? 'approved' : 'pending'
+    return Object.values(votes).includes(true) ? 'approved' : 'pending'
+  }
+
+  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/room/${room}`)
+  ws.binaryType = 'arraybuffer'
+  ws.onopen = () => ws.send(JSON.stringify({ type: 'join', agent, kind: 'human' }))
+  ws.onmessage = (e) => {
+    if (typeof e.data !== 'string') return Y.applyUpdate(ydoc, new Uint8Array(e.data), 'remote')
+    const m = JSON.parse(e.data)
+    if (m.type === 'presence')
+      document.getElementById('peers').innerHTML = m.peers
+        .map((p) => `<li>${p.kind === 'agent' ? '🤖 ' : ''}${esc(p.agent)}</li>`).join('')
+    else if (m.type === 'bus') feed(`<b>${esc(m.from)}</b> [${esc(m.topic)}] ${esc(JSON.stringify(m.data))}`)
+  }
+  ydoc.on('update', (u, origin) => { if (origin !== 'remote' && ws.readyState === 1) ws.send(u) })
+
+  const ta = document.getElementById('doc')
+  ytext.observe(() => { if (document.activeElement !== ta) ta.value = ytext.toString() })
+  // ponytail: whole-text replace per keystroke; swap for a diffing binding if two humans type at once
+  ta.oninput = () => ydoc.transact(() => { ytext.delete(0, ytext.length); ytext.insert(0, ta.value) })
+
+  ytasks.observeDeep(renderTasks)
+  function renderTasks() {
+    document.getElementById('tasks').innerHTML = [...ytasks.entries()]
+      .map(([id, t]) => `<div class="task"><b>${esc(t.title)}</b><br>
+        <small>${esc(t.status)}${t.owner ? ' — ' + esc(t.owner) : ''}</small><br>
+        <button data-id="${id}" data-s="working">claim</button>
+        <button data-id="${id}" data-s="completed">done</button>
+        <button data-id="${id}" data-s="failed">fail</button></div>`).join('')
+  }
+  document.getElementById('tasks').onclick = (e) => {
+    const { id, s } = e.target.dataset
+    if (id) ytasks.set(id, { ...ytasks.get(id), status: s, owner: agent })
+  }
+  document.getElementById('addtask').onsubmit = (e) => {
+    e.preventDefault()
+    const input = e.target.querySelector('input')
+    if (!input.value.trim()) return
+    ytasks.set(crypto.randomUUID().slice(0, 8), { title: input.value, status: 'submitted', owner: null })
+    input.value = ''
+  }
+  yprops.observeDeep(renderProps)
+  function renderProps() {
+    document.getElementById('proposals').innerHTML = [...yprops.entries()]
+      .map(([id, p]) => `<div class="task"><b>${esc(p.title)}</b><br>
+        <small>[${proposalStatus(p)}] by ${esc(p.proposedBy)} — ${esc(p.description || '')}</small><br>
+        <small>votes: ${esc(Object.entries(p.votes || {}).map(([w, v]) => w + '=' + (v ? 'yes' : 'no')).join(', ') || 'none')}</small><br>
+        <button data-pid="${id}" data-v="1">approve</button>
+        <button data-pid="${id}" data-v="">reject</button></div>`).join('')
+  }
+  document.getElementById('proposals').onclick = (e) => {
+    const { pid, v } = e.target.dataset
+    if (!pid) return
+    const p = yprops.get(pid)
+    yprops.set(pid, { ...p, votes: { ...p.votes, [agent]: !!v } })
+  }
+
+  yquestions.observeDeep(renderQs)
+  function renderQs() {
+    document.getElementById('questions').innerHTML = [...yquestions.entries()]
+      .map(([id, q]) => `<div class="task"><b>${esc(q.from)}</b> asks: ${esc(q.question)}<br>
+        ${q.answer ? `<small>↳ ${esc(q.answer)} — ${esc(q.answeredBy)}</small>` : `<button data-qid="${id}">answer</button>`}</div>`).join('')
+  }
+  document.getElementById('questions').onclick = (e) => {
+    const { qid } = e.target.dataset
+    if (!qid) return
+    const a = prompt(yquestions.get(qid).question)
+    if (a) yquestions.set(qid, { ...yquestions.get(qid), answer: a, answeredBy: agent })
+  }
+
+  document.getElementById('chat').onsubmit = (e) => {
+    e.preventDefault()
+    const input = e.target.querySelector('input')
+    if (!input.value.trim()) return
+    ws.send(JSON.stringify({ type: 'bus', topic: 'chat', data: input.value }))
+    feed(`<b>${esc(agent)}</b> [chat] ${esc(JSON.stringify(input.value))}`)
+    input.value = ''
+  }
+
+  function feed(htmlStr) {
+    const d = document.createElement('div')
+    d.innerHTML = htmlStr
+    document.getElementById('feed').prepend(d)
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])) }
+</script>

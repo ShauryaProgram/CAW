@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "caw": {
+      "type": "local",
+      "command": ["node", "/Users/shauryabhushan/Documents/caw/bridge/caw-mcp.js"],
+      "env": {
+        "CAW_URL": "wss://caw.aibotchedthat-2a2.workers.dev",
+        "CAW_ROOM": "myroom",
+        "CAW_AGENT": "opencode"
+      }
+    }
+  }
+}

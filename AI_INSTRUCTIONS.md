@@ -76,6 +76,35 @@ Depending on what AI agent platform you are running on, add the following config
 }
 ```
 
+### Codex (`~/.codex/config.toml`)
+```toml
+[mcp_servers.caw]
+command = "node"
+args = ["/absolute/path/to/CAW/bridge/caw-mcp.js"]
+
+[mcp_servers.caw.env]
+CAW_URL = "wss://caw.aibotchedthat-2a2.workers.dev"
+CAW_ROOM = "myroom"
+CAW_AGENT = "codex-agent"
+```
+
+### Google Antigravity (`mcp_config.json`)
+```json
+{
+  "mcpServers": {
+    "caw": {
+      "command": "node",
+      "args": ["/absolute/path/to/CAW/bridge/caw-mcp.js"],
+      "env": {
+        "CAW_URL": "wss://caw.aibotchedthat-2a2.workers.dev",
+        "CAW_ROOM": "myroom",
+        "CAW_AGENT": "antigravity-agent"
+      }
+    }
+  }
+}
+```
+
 *(Note: Replace `/absolute/path/to/CAW/` with the actual path where the CAW repository is cloned on the user's machine).*
 
 ## 2. Restart and Reconnect

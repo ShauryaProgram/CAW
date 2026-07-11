@@ -20,6 +20,8 @@
 //   stats                      progress: who's on what, counts, open gates
 //   watch                      live-tail presence, bus, and task changes (Ctrl-C to stop)
 //   watchdog                   auto-recover stalled tasks if agents go silent
+//   auto-approve [cmd]         auto-run tests on phase gates (e.g. `npm test`)
+//   sync-tasks                 auto-extract bullet points under '## Tasks' to the task queue
 import WebSocket from 'ws'
 import * as Y from 'yjs'
 
@@ -243,6 +245,68 @@ switch (cmd) {
     for (const [id, t] of tasks.filter(([, t]) => t.status === 'input-required')) console.log(`  GATE: ${t.title} (${id})${t.note ? ' — ' + t.note : ''}`)
     for (const [id, p] of [...yprops.entries()].filter(([, p]) => proposalStatus(p) === 'pending')) console.log(`  pending proposal: ${p.title} (${id})`)
     for (const [id, q] of [...yquestions.entries()].filter(([, q]) => !q.answer)) console.log(`  open question from ${q.from}: ${q.question} (${id})`)
+    break
+  }
+  case 'auto-approve': {
+    const execSync = (await import('node:child_process')).execSync
+    const runCmd = rest.join(' ') || 'npm test'
+    console.log(`watching for 'input-required' tasks to auto-approve via: ${runCmd}`)
+    ytasks.observeDeep(() => {
+      ydoc.transact(() => {
+        for (const [id, t] of ytasks.entries()) {
+          if (t.status === 'input-required') {
+            console.log(`\n[auto-approve] Task ${id} (${t.title}) needs approval. Running tests...`)
+            try {
+              execSync(runCmd, { stdio: 'inherit' })
+              console.log(`[auto-approve] ✅ Tests passed! Auto-approving task ${id}.`)
+              ytasks.set(id, { ...t, status: 'completed', note: 'auto-approved by CI' })
+              ws.send(JSON.stringify({ type: 'bus', topic: 'task.completed', data: { id, title: t.title, note: 'auto-approved' } }))
+            } catch (err) {
+              console.log(`[auto-approve] ❌ Tests failed. Rejecting task ${id}.`)
+              ytasks.set(id, { ...t, status: 'failed', note: 'auto-rejected by CI failure' })
+              ws.send(JSON.stringify({ type: 'bus', topic: 'task.failed', data: { id, title: t.title, note: 'auto-rejected' } }))
+            }
+          }
+        }
+      })
+    })
+    await new Promise(() => {})
+    break
+  }
+  case 'sync-tasks': {
+    console.log(`watching shared doc for '## Tasks' to auto-orchestrate...`)
+    let lastDoc = ''
+    ytext.observe(() => {
+      const currentDoc = ytext.toString()
+      if (currentDoc === lastDoc) return
+      lastDoc = currentDoc
+      
+      const lines = currentDoc.split('\n')
+      let inTasks = false
+      const newTasks = []
+      for (const line of lines) {
+        if (line.trim().toLowerCase() === '## tasks') { inTasks = true; continue }
+        if (inTasks && line.startsWith('## ')) { inTasks = false; continue }
+        if (inTasks) {
+          const match = line.match(/^[-*]\s+(.+)/)
+          if (match) newTasks.push(match[1].trim())
+        }
+      }
+      
+      if (newTasks.length > 0) {
+        ydoc.transact(() => {
+          const existingTitles = new Set([...ytasks.values()].map(t => t.title))
+          for (const title of newTasks) {
+            if (!existingTitles.has(title)) {
+              const id = Math.random().toString(36).slice(2, 10)
+              ytasks.set(id, { title, status: 'submitted', owner: null, note: 'auto-extracted from doc' })
+              console.log(`[sync-tasks] Auto-created task: ${title}`)
+            }
+          }
+        })
+      }
+    })
+    await new Promise(() => {})
     break
   }
   case 'watch':

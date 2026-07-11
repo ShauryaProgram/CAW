@@ -202,4 +202,39 @@ server.registerTool('caw_worktree', {
   return text({ path: wt, branch: 'cas/' + AGENT, sharedRepo: DIR })
 })
 
+server.registerTool('caw_vfs_read', {
+  description: 'Virtual File System: Read a file from the project directory (CAW_DIR).',
+  inputSchema: { filePath: z.string() }
+}, async ({ filePath }) => {
+  if (!DIR) return text('CAW_DIR is not set for this bridge — ask the human to configure it')
+  const fs = await import('node:fs')
+  const p = path.resolve(DIR, filePath)
+  if (!p.startsWith(path.resolve(DIR))) return text('Access denied outside CAW_DIR')
+  if (!fs.existsSync(p)) return text(`File not found: ${filePath}`)
+  return text(fs.readFileSync(p, 'utf8'))
+})
+
+server.registerTool('caw_vfs_write', {
+  description: 'Virtual File System: Write a file to the project directory (CAW_DIR). You MUST have a claimed task in the "working" state to use this.',
+  inputSchema: { filePath: z.string(), content: z.string() }
+}, async ({ filePath, content }) => {
+  await ensure()
+  if (!DIR) return text('CAW_DIR is not set for this bridge — ask the human to configure it')
+  
+  // Intercept check: does this agent own a working task?
+  const ownedTasks = [...ytasks.entries()].filter(([, t]) => t.status === 'working' && t.owner === AGENT)
+  if (ownedTasks.length === 0) {
+    return text('❌ INTERCEPTED: You cannot write files unless you have claimed a task and it is in the "working" state. Please use caw_claim_task first, or caw_propose if this is new work.')
+  }
+
+  const fs = await import('node:fs')
+  const p = path.resolve(DIR, filePath)
+  if (!p.startsWith(path.resolve(DIR))) return text('Access denied outside CAW_DIR')
+  
+  fs.mkdirSync(path.dirname(p), { recursive: true })
+  fs.writeFileSync(p, content)
+  sock.send(JSON.stringify({ type: 'bus', topic: 'intent.write', data: { filePath, agent: AGENT } }))
+  return text(`✅ Wrote ${filePath} (Authorized via task: ${ownedTasks[0][1].title})`)
+})
+
 await server.connect(new StdioServerTransport())
